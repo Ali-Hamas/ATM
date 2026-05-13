@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/demobank/atm-auth/internal/realtime"
+	"github.com/demobank/atm-auth/internal/web"
 	"github.com/rs/cors"
 )
 
@@ -38,6 +39,10 @@ func NewRouter(h *Handlers, hub *realtime.Hub) http.Handler {
 
 	// WebSocket
 	mux.Handle("/ws", hub)
+
+	// Static ATM simulator UI (embedded). Catch-all on "/" — only reached
+	// for paths not matched by the more specific /api and /ws routes above.
+	mux.Handle("/", web.Handler())
 
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"*"},

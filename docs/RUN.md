@@ -1,20 +1,18 @@
 # Running the demo locally
 
-You'll run three things: the backend, the ATM simulator (browser), and the mobile app (Expo).
+The Go backend serves **the ATM web UI, the REST API, and the WebSocket from the same port**. You only need two terminals: one for the backend, one for the mobile app.
 
 ## Prereqs
 
-- Node.js 20+ and npm
-- For the mobile app on a real device: the Expo Go app from the Play Store / App Store
-- Both your phone and your laptop on the same Wi-Fi
+- Go 1.22+ — https://go.dev/dl/
+- Node.js 20+ and npm (only for the mobile app and for rebuilding the ATM UI)
+- For testing the mobile app on a real device: Expo Go from the App Store / Play Store
+- Phone and laptop on the same Wi-Fi (if using a real phone)
 
-## 1. Backend (Go)
-
-Install Go 1.22+ from https://go.dev/dl/, then:
+## 1. Backend + ATM UI (one terminal)
 
 ```bash
 cd backend-go
-go mod tidy
 go run ./cmd/server
 ```
 
@@ -24,47 +22,66 @@ auth middleware listening on :4000
 ws endpoint  ws://localhost:4000/ws?sid=<sessionId>
 ```
 
-## 2. ATM simulator
-
-In a second terminal:
-
-```bash
-cd atm-simulator
-npm install
-npm run dev
+Open the ATM in your browser:
+```
+http://localhost:4000
 ```
 
-Open the URL Vite prints (usually `http://localhost:5173`). You'll see the ATM screen.
+That's the ATM simulator screen. **No `npm run dev` needed** — the built UI is embedded inside the Go binary.
 
-## 3. Mobile app (Expo)
-
-In a third terminal:
+## 2. Mobile app (Expo)
 
 ```bash
 cd mobile-app
-npm install
+npm install              # first time only
 npx expo start
 ```
 
 ### Pointing the app at your backend
 
-The mobile app defaults to `http://10.0.2.2:4000`, which is the Android emulator's loopback to your host machine. If you're running on:
+The mobile app defaults to `http://10.0.2.2:4000` (the Android emulator's loopback). For other targets, edit `API_BASE` in `mobile-app/App.tsx`:
 
-- **A real phone with Expo Go** — open `mobile-app/App.tsx` and change `API_BASE` to `http://<your-laptop-LAN-IP>:4000` (e.g. `http://192.168.1.42:4000`)
-- **iOS simulator** — change `API_BASE` to `http://localhost:4000`
+- **Real phone (Expo Go)** — `http://<your-laptop-LAN-IP>:4000` (find it with `ipconfig` on Windows; look at the Wi-Fi IPv4 address)
+- **iOS simulator** — `http://localhost:4000`
+
+Allow port 4000 through Windows Firewall when prompted.
 
 Scan the Expo QR with your phone (Android: Expo Go's scanner; iOS: the Camera app).
 
-## 4. The demo
+## 3. The demo
 
-1. In the ATM browser tab: click **Continue** → **Cardless Cash Withdrawal**. A QR appears with a 60s timer.
-2. In the bank-app on your phone: tap **Cardless ATM Access** → grant camera permission → point at the QR on the laptop screen.
-3. Tap **Approve with biometrics (mocked)** in the app.
-4. The ATM screen flips to **Authenticated** within a second (WebSocket push).
-5. Pick an amount → ATM shows "Please take your cash" and resets.
+1. In `http://localhost:4000` (the ATM tab): click **Continue** → **Cardless Cash Withdrawal**. A QR appears inside a gold scanning ring with a 60s countdown.
+2. On your phone's bank app: tap **Cardless ATM Access** → grant camera permission → point at the QR.
+3. Tap **Approve with biometrics (mocked)**.
+4. The ATM tab flips to **Authenticated** within a second — that's the WebSocket push.
+5. Pick an amount → cash dispense animation → resets to idle.
+
+## Rebuilding the ATM UI
+
+If you edit anything under `atm-simulator/src/`, rebuild and re-embed:
+
+```bash
+cd atm-simulator
+npm install              # first time only
+npm run build            # produces dist/
+cp -r dist/* ../backend-go/internal/web/static/
+cd ../backend-go
+go run ./cmd/server      # picks up the new build
+```
+
+## Production-style binary
+
+```bash
+cd backend-go
+go build -o atm-auth.exe ./cmd/server
+./atm-auth.exe
+```
+
+The result is a single ~10 MB executable with no external dependencies. Copy it anywhere; it serves the entire ATM stack.
 
 ## Troubleshooting
 
-- **App stuck on "Authorising…"** — the phone can't reach the backend. Check `API_BASE` is your laptop's LAN IP and that your laptop firewall allows port 4000.
-- **QR scan does nothing** — make sure the ATM tab is fully visible on screen (not minimised). Some autofocus needs a moment.
-- **"session_expired"** — the QR expires in 60 seconds by default. Set `SESSION_TTL_SECONDS=120` in the backend's environment if you need longer for live demos.
+- **App stuck on "Authorising…"** — phone can't reach the backend. Check `API_BASE` is your laptop's LAN IP and that the firewall allows port 4000.
+- **`go: command not found`** — install Go, then close and re-open your terminal.
+- **Browser shows old UI after editing source** — you forgot to rebuild + re-embed (see *Rebuilding the ATM UI*). The Go binary embeds the UI at compile time.
+- **"session_expired"** — QR expires in 60s by default. Set `SESSION_TTL_SECONDS=120` before starting the backend if you need a longer demo window.
