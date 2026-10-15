@@ -29,6 +29,12 @@ type Config struct {
 
 	// Legacy HMAC secret (optional fallback for dev environments)
 	JWTSecret string
+
+	// Strict Security & Fleet Configuration
+	RequireMTLS      bool
+	ATMAllowlist     []string
+	RedisRequired    bool
+	DatabaseRequired bool
 }
 
 func Load() (Config, error) {
@@ -44,6 +50,10 @@ func Load() (Config, error) {
 		KeyID:             envStr("JWT_KID", "bank-atm-key-1"),
 		RedisURL:          envStr("REDIS_URL", os.Getenv("REDIS_ADDR")),
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
+		RequireMTLS:       envBool("REQUIRE_MTLS", isProd),
+		ATMAllowlist:      parseOrigins(envStr("ATM_ALLOWLIST", "ATM-DEMO-001,ATM-001,ATM-LONDON-01,ATM-MAIN-001")),
+		RedisRequired:     envBool("REDIS_REQUIRED", isProd),
+		DatabaseRequired:  envBool("DATABASE_REQUIRED", isProd),
 	}
 
 	// 1. Try loading RSA Private Key (file path or inline PEM env)
@@ -85,18 +95,13 @@ func Load() (Config, error) {
 	// 3. Fallback secret handling
 	cfg.JWTSecret = os.Getenv("JWT_SECRET")
 
-	// In production, we MUST have RSA keys and MUST NOT have dev fallback secrets
+	// In production, we MUST have RSA keys and MUST NOT have dev/HMAC secrets
 	if isProd {
 		if cfg.RSAPrivateKey == nil {
 			return cfg, errors.New("FATAL: Production environment requires RSA_PRIVATE_KEY or RSA_PRIVATE_KEY_FILE for RS256 token signing")
 		}
-		if cfg.JWTSecret == "dev-secret-change-me" {
-			return cfg, errors.New("FATAL: Hardcoded dev JWT secret is forbidden in production")
-		}
-	} else {
-		// In dev mode, if no RSA key is supplied, generate an ephemeral RSA key pair for bank-grade crypto
-		if cfg.RSAPrivateKey == nil && cfg.JWTSecret == "" {
-			cfg.JWTSecret = "dev-secret-change-me"
+		if cfg.JWTSecret != "" {
+			return cfg, errors.New("FATAL: Symmetric JWT_SECRET is strictly forbidden in production; RS256 with RSA keys is mandatory")
 		}
 	}
 

@@ -103,13 +103,13 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// observed a session ID from silently eavesdropping alongside the
 	// legitimate ATM client.
 	h.mu.Lock()
-	if old, exists := h.subs[sid]; exists {
+	if _, exists := h.subs[sid]; exists {
 		h.mu.Unlock()
-		log.Printf("[ws] evicting existing subscriber for sid=%s (single-subscriber policy)", sid)
-		old.closeWith(1008, "session taken by a newer connection")
-		// Give the goroutine of the old connection time to exit before re-acquiring the lock
-		time.Sleep(50 * time.Millisecond)
-		h.mu.Lock()
+		log.Printf("[ws] rejecting takeover attempt for active sid=%s (single-subscriber policy)", sid)
+		_ = ws.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(4408, "session already subscribed by active terminal"), time.Now().Add(writeWait))
+		ws.Close()
+		return
 	}
 	h.subs[sid] = c
 	h.mu.Unlock()
@@ -176,7 +176,7 @@ func (h *Hub) unsubscribe(sid string, c *conn) {
 	c.ws.Close()
 }
 
-// Notify broadcasts { type: event, session } to the single subscriber of session.ID.
+// Notify broadcasts minimal event notification { type, sessionId, atmId, status } to the single subscriber of session.ID.
 func (h *Hub) Notify(s *session.Session, event string) {
 	h.mu.RLock()
 	c := h.subs[s.ID]
@@ -185,7 +185,13 @@ func (h *Hub) Notify(s *session.Session, event string) {
 	if c == nil {
 		return
 	}
-	c.writeJSON(map[string]interface{}{"type": event, "session": s})
+	// Bank-grade minimal event payload (no customer PII)
+	c.writeJSON(map[string]interface{}{
+		"type":      event,
+		"sessionId": s.ID,
+		"atmId":     s.AtmID,
+		"status":    s.Status,
+	})
 }
 
 func (c *conn) writeJSON(v interface{}) {

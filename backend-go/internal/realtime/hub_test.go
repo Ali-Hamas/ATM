@@ -12,14 +12,16 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func TestHubSingleSubscriberEviction(t *testing.T) {
+// TestHubRejectSecondSubscriber asserts the hardened single-subscriber policy (CODE-010):
+// Prevents an attacker from evicting or hijacking an active ATM terminal's WebSocket session.
+func TestHubRejectSecondSubscriber(t *testing.T) {
 	hub := realtime.NewHub()
 	ts := httptest.NewServer(hub)
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws?sid=sess-test-001"
 
-	// 1. First client connects
+	// 1. First legitimate ATM client connects
 	ws1, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("first dial failed: %v", err)
@@ -35,30 +37,19 @@ func TestHubSingleSubscriberEviction(t *testing.T) {
 		t.Fatalf("unexpected greeting on client 1: %v", msg1)
 	}
 
-	// 2. Second client connects with SAME session ID
+	// 2. Second client attempts to hijack/subscribe with the SAME session ID
 	ws2, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("second dial failed: %v", err)
-	}
-	defer ws2.Close()
-
-	// Read greeting on client 2
-	var msg2 map[string]interface{}
-	if err := ws2.ReadJSON(&msg2); err != nil {
-		t.Fatalf("failed to read greeting on client 2: %v", err)
-	}
-	if msg2["type"] != "subscribed" || msg2["sid"] != "sess-test-001" {
-		t.Fatalf("unexpected greeting on client 2: %v", msg2)
+	if err == nil {
+		defer ws2.Close()
+		// Expect client 2 to be closed immediately due to active subscriber reject policy
+		_ = ws2.SetReadDeadline(time.Now().Add(1 * time.Second))
+		_, _, readErr2 := ws2.ReadMessage()
+		if readErr2 == nil {
+			t.Errorf("expected client 2 to be rejected and closed, but connection succeeded")
+		}
 	}
 
-	// 3. Client 1 should now receive a close message / error due to eviction
-	_ = ws1.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, _, err1 := ws1.ReadMessage()
-	if err1 == nil {
-		t.Errorf("expected client 1 to be evicted and closed, but ReadMessage succeeded")
-	}
-
-	// 4. Notify should only reach client 2
+	// 3. Client 1 (the legitimate ATM) MUST still be connected and receive notifications
 	sess := &session.Session{
 		ID:                    "sess-test-001",
 		AtmID:                 "ATM-DEMO-001",
@@ -67,10 +58,10 @@ func TestHubSingleSubscriberEviction(t *testing.T) {
 	}
 	hub.Notify(sess, "approved")
 
-	_ = ws2.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, msgBytes, err2 := ws2.ReadMessage()
-	if err2 != nil {
-		t.Fatalf("client 2 failed to receive notification: %v", err2)
+	_ = ws1.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msgBytes, err1 := ws1.ReadMessage()
+	if err1 != nil {
+		t.Fatalf("legitimate client 1 failed to receive notification: %v", err1)
 	}
 
 	var notifyMsg map[string]interface{}
@@ -79,6 +70,9 @@ func TestHubSingleSubscriberEviction(t *testing.T) {
 	}
 	if notifyMsg["type"] != "approved" {
 		t.Errorf("expected type 'approved', got %v", notifyMsg["type"])
+	}
+	if notifyMsg["sessionId"] != "sess-test-001" {
+		t.Errorf("expected sessionId 'sess-test-001', got %v", notifyMsg["sessionId"])
 	}
 }
 
@@ -91,7 +85,6 @@ func TestHubMissingSidRejected(t *testing.T) {
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
 	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		// Some dialers fail during handshake if server sends close immediately
 		return
 	}
 	defer ws.Close()

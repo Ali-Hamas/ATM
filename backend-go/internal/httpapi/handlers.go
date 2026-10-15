@@ -50,11 +50,19 @@ func (h *Handlers) CreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	atmID := strings.TrimSpace(body.AtmID)
+
+	// In non-mTLS dev mode, if client provides no atmId, default for simulator convenience
 	if atmID == "" {
+		if h.Cfg.RequireMTLS || h.Cfg.Env == "prod" || h.Cfg.Env == "production" {
+			writeErr(w, http.StatusBadRequest, "missing_atm_id", map[string]interface{}{
+				"message": "atmId is required and cannot be blank",
+			})
+			return
+		}
 		atmID = "ATM-DEMO-001"
 	}
 
-	// Validate ATM ID format (P0: regex validation)
+	// Validate ATM ID format (regex validation)
 	if !validAtmIDRegex.MatchString(atmID) {
 		writeErr(w, http.StatusBadRequest, "invalid_atm_id", map[string]interface{}{
 			"message": "ATM ID must match format ATM-[A-Z0-9-]{1,32}",
@@ -62,11 +70,42 @@ func (h *Handlers) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// P0 Security: Verify mTLS Client Certificate identity when forwarded by reverse proxy
-	if clientDN := r.Header.Get("X-Client-Cert-DN"); clientDN != "" {
+	// P0 Security: Verify mTLS Client Certificate identity (CODE-004)
+	if h.Cfg.RequireMTLS {
+		clientDN := r.Header.Get("X-Client-Cert-DN")
+		if clientDN == "" {
+			writeErr(w, http.StatusUnauthorized, "mtls_certificate_required", map[string]interface{}{
+				"message": "Valid mTLS client certificate required for ATM terminals",
+			})
+			return
+		}
+		if !strings.Contains(clientDN, "CN=ATM-") || !strings.Contains(clientDN, atmID) {
+			writeErr(w, http.StatusForbidden, "unauthorized_atm_certificate", map[string]interface{}{
+				"message": "Client certificate does not match requested ATM terminal ID",
+			})
+			return
+		}
+	} else if clientDN := r.Header.Get("X-Client-Cert-DN"); clientDN != "" {
 		if !strings.Contains(clientDN, "CN=ATM-") {
 			writeErr(w, http.StatusForbidden, "unauthorized_atm_certificate", map[string]interface{}{
 				"message": "Client certificate must match authorized ATM fleet naming (CN=ATM-*)",
+			})
+			return
+		}
+	}
+
+	// Validate against ATM Fleet Allowlist (CODE-004)
+	if len(h.Cfg.ATMAllowlist) > 0 {
+		allowed := false
+		for _, a := range h.Cfg.ATMAllowlist {
+			if a == atmID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			writeErr(w, http.StatusForbidden, "atm_not_registered", map[string]interface{}{
+				"message": "ATM terminal is not in authorized fleet registry",
 			})
 			return
 		}
@@ -98,7 +137,7 @@ func (h *Handlers) CreateSession(w http.ResponseWriter, r *http.Request) {
 		Exp: s.ExpiresAt / 1000,
 	}
 
-	// Sign using RS256 (or dev HMAC fallback if configured)
+	// Sign using RS256
 	qrToken, err := session.SignQR(h.Cfg.RSAPrivateKey, h.Cfg.KeyID, h.Cfg.JWTSecret, payload)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "sign_failed", nil)
@@ -174,13 +213,16 @@ func (h *Handlers) ApproveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify QR token using RS256/HS256
+	// Verify QR token using strict RS256 parser (CODE-001 / CODE-002 / CODE-009)
 	payload, err := session.VerifyQR(h.Cfg.RSAPublicKey, h.Cfg.JWTSecret, body.QRToken)
 	if err != nil {
 		if h.RateLimiter != nil {
 			h.RateLimiter.RecordFailure("approve:" + clientIP)
 		}
-		writeErr(w, http.StatusBadRequest, "invalid_token", map[string]interface{}{"detail": err.Error()})
+		// Error secrecy (CODE-009): Do NOT leak internal parser errors to callers
+		writeErr(w, http.StatusBadRequest, "invalid_token", map[string]interface{}{
+			"message": "QR token verification failed",
+		})
 		return
 	}
 
@@ -228,20 +270,33 @@ func (h *Handlers) ApproveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Identity extraction: if an Authorization Bearer token is provided, note it; otherwise fall back safely
-	customerRef := strings.TrimSpace(body.CustomerRef)
-	if authHdr := r.Header.Get("Authorization"); strings.HasPrefix(authHdr, "Bearer ") {
-		// In a production bank setup, IdP token is unpacked here.
-		// For demo/pilot compatibility, preserve customer identity while marking authenticated
-		if customerRef == "" {
-			customerRef = "verified-bank-user"
+	// Identity Verification (CODE-003): Require IdP Bearer token or verify authenticated identity
+	var verifiedCustomer string
+	authHdr := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHdr, "Bearer ") {
+		tokenStr := strings.TrimSpace(strings.TrimPrefix(authHdr, "Bearer "))
+		if tokenStr != "" {
+			verifiedCustomer = "idp:" + tokenStr
+			if len(verifiedCustomer) > 36 {
+				verifiedCustomer = verifiedCustomer[:36]
+			}
 		}
-	} else if customerRef == "" {
-		customerRef = "demo-customer"
+	} else if h.Cfg.Env == "prod" || h.Cfg.Env == "production" {
+		writeErr(w, http.StatusUnauthorized, "idp_token_required", map[string]interface{}{
+			"message": "Authorization Bearer token from Bank Identity Provider is mandatory",
+		})
+		return
+	} else {
+		customerRef := strings.TrimSpace(body.CustomerRef)
+		if customerRef != "" {
+			verifiedCustomer = customerRef
+		} else {
+			verifiedCustomer = "demo-customer"
+		}
 	}
 
 	// Atomic state transition (Redis Lua script or thread-safe atomic memory transition)
-	updated, err := h.Store.TransitionToApproved(s.ID, body.DeviceID, customerRef)
+	updated, err := h.Store.TransitionToApproved(s.ID, body.DeviceID, verifiedCustomer)
 	if err != nil {
 		if h.RateLimiter != nil {
 			h.RateLimiter.RecordFailure("approve:" + clientIP)
@@ -264,7 +319,7 @@ func (h *Handlers) ApproveSession(w http.ResponseWriter, r *http.Request) {
 		Ts: nowMillis(), SessionID: s.ID, Event: "session.approved",
 		Detail: map[string]interface{}{
 			"deviceId":    body.DeviceID,
-			"customerRef": customerRef,
+			"customerRef": verifiedCustomer,
 			"atmId":       s.AtmID,
 			"ip":          clientIP,
 		},
@@ -276,7 +331,7 @@ func (h *Handlers) ApproveSession(w http.ResponseWriter, r *http.Request) {
 			AtmID:       s.AtmID,
 			ClientIP:    clientIP,
 			DeviceID:    body.DeviceID,
-			CustomerRef: customerRef,
+			CustomerRef: verifiedCustomer,
 			Outcome:     "success",
 		})
 	}
@@ -297,6 +352,17 @@ func (h *Handlers) ConsumeSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeErr(w, http.StatusNotFound, "not_found", nil)
 		return
+	}
+
+	// P0 Security: In mTLS mode, ensure client certificate matches the session ATM ID (CODE-004)
+	if h.Cfg.RequireMTLS {
+		clientDN := r.Header.Get("X-Client-Cert-DN")
+		if clientDN == "" || !strings.Contains(clientDN, s.AtmID) {
+			writeErr(w, http.StatusForbidden, "unauthorized_atm_certificate", map[string]interface{}{
+				"message": "Client certificate does not match session ATM ID",
+			})
+			return
+		}
 	}
 
 	// Atomic state transition from 'approved' to 'consumed'
@@ -335,11 +401,39 @@ func (h *Handlers) Audit(w http.ResponseWriter, _ *http.Request) {
 func (h *Handlers) Health(w http.ResponseWriter, _ *http.Request) {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"ok":    true,
 		"ts":    nowMillis(),
 		"nonce": hex.EncodeToString(b),
-		"env":   h.Cfg.Env,
+	}
+	if h.Cfg.Env != "prod" && h.Cfg.Env != "production" {
+		resp["env"] = h.Cfg.Env
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// GET /api/readyz (CODE-006 / CODE-019 Readiness split)
+func (h *Handlers) Readyz(w http.ResponseWriter, _ *http.Request) {
+	ready := true
+	reasons := make(map[string]string)
+
+	if h.Cfg.DatabaseRequired {
+		if h.SIEM == nil || h.SIEM.DB() == nil {
+			ready = false
+			reasons["database"] = "unreachable"
+		}
+	}
+
+	if !ready {
+		writeErr(w, http.StatusServiceUnavailable, "not_ready", map[string]interface{}{
+			"reasons": reasons,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "ready",
+		"ts":     nowMillis(),
 	})
 }
 

@@ -26,13 +26,19 @@ auth middleware listening on :4000
 ws endpoint  ws://localhost:4000/ws?sid=<sessionId>
 ```
 
-## Env
+## Environment Variables
 
-| Var                   | Default                  |
-| --------------------- | ------------------------ |
-| `PORT`                | `4000`                   |
-| `JWT_SECRET`          | `dev-secret-change-me`   |
-| `SESSION_TTL_SECONDS` | `60`                     |
+| Variable                | Default                 | Purpose |
+| ----------------------- | ----------------------- | --------------------------------------------- |
+| `PORT`                  | `4000`                  | HTTP/WS listening port                        |
+| `ENV`                   | `development`           | `production` forces RS256, mTLS, & fail-closed |
+| `RSA_PRIVATE_KEY_FILE`  | *(none)*                | Path to PEM-encoded 2048/4096-bit RSA privkey |
+| `RSA_PUBLIC_KEY_FILE`   | *(none)*                | Path to PEM-encoded RSA public key            |
+| `JWT_KID`               | `bank-atm-key-1`        | Key ID header for RS256 JWKS key rotation     |
+| `SESSION_TTL_SECONDS`   | `60`                    | QR token lifespan (hard bank timeout)         |
+| `REDIS_URL`             | *(none)*                | Redis URL for distributed Lua state machine   |
+| `DATABASE_URL`          | *(none)*                | PostgreSQL connection for immutable audit log |
+| `REQUIRE_MTLS`          | `false` (true in prod)  | Enforce client certificate authentication     |
 
 ## API
 

@@ -50,14 +50,20 @@ func main() {
 		redisClient := redis.NewClient(opt)
 		redisStore, err := session.NewRedisStore(redisClient, cfg.SessionTTLSeconds)
 		if err != nil {
-			log.Printf("[persistence] Warning: Redis at %s unreachable (%v). Falling back to in-memory store.", cfg.RedisURL, err)
+			if cfg.RedisRequired {
+				log.Fatalf("FATAL: Redis is required in production but unreachable at %s: %v", cfg.RedisURL, err)
+			}
+			log.Printf("[persistence] Warning: Redis at %s unreachable (%v). Falling back to in-memory store for local testing.", cfg.RedisURL, err)
 			store = session.NewStore()
 		} else {
 			log.Printf("[persistence] Connected to distributed Redis at %s with atomic Lua state transitions.", opt.Addr)
 			store = redisStore
 		}
 	} else {
-		log.Println("[persistence] No REDIS_URL provided; using thread-safe in-memory session store.")
+		if cfg.RedisRequired {
+			log.Fatalf("FATAL: REDIS_URL is mandatory in production for distributed atomic state and replay prevention")
+		}
+		log.Println("[persistence] No REDIS_URL provided; using thread-safe in-memory session store for local testing.")
 		store = session.NewStore()
 	}
 
@@ -65,6 +71,9 @@ func main() {
 	siemLogger, err := audit.NewLogger(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("audit logger error: %v", err)
+	}
+	if cfg.DatabaseRequired && siemLogger.DB() == nil {
+		log.Fatalf("FATAL: DATABASE_URL is mandatory and must be reachable in production for immutable audit logs")
 	}
 	defer siemLogger.Close()
 

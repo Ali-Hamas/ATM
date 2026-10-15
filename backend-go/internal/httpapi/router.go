@@ -15,6 +15,7 @@ func NewRouter(h *Handlers, hub *realtime.Hub) http.Handler {
 
 	// REST
 	mux.HandleFunc("/api/health", methodOnly("GET", h.Health))
+	mux.HandleFunc("/api/readyz", methodOnly("GET", h.Readyz))
 	mux.HandleFunc("/api/audit", methodOnly("GET", h.Audit))
 	mux.HandleFunc("/api/session", methodOnly("POST", h.CreateSession))
 	mux.HandleFunc("/api/session/approve", methodOnly("POST", h.ApproveSession))

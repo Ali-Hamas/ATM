@@ -25,6 +25,7 @@ type SIEMEvent struct {
 	ClientIP    string                 `json:"client.ip,omitempty"`
 	DeviceID    string                 `json:"client.device_id,omitempty"`
 	CustomerRef string                 `json:"user.name,omitempty"`
+	RequestID   string                 `json:"trace.id,omitempty"`
 	Reason      string                 `json:"error.message,omitempty"`
 	Detail      map[string]interface{} `json:"detail,omitempty"`
 }
@@ -64,9 +65,50 @@ func NewLogger(databaseURL string) (*Logger, error) {
 	return l, nil
 }
 
+// DB returns the underlying database pool for health and readiness checks
+func (l *Logger) DB() *sql.DB {
+	return l.db
+}
+
 // Record emits a SIEM event to stdout (for log forwarders like Splunk UF/Filebeat)
 // and asynchronously persists it to PostgreSQL if configured.
 func (l *Logger) Record(ev SIEMEvent) {
+	l.enrichEvent(&ev)
+
+	// 1. Stream structured JSON to stdout for SIEM log shippers
+	if l.logStdout {
+		b, err := json.Marshal(ev)
+		if err == nil {
+			fmt.Fprintln(os.Stdout, string(b))
+		}
+	}
+
+	// 2. Insert into PostgreSQL if connected
+	if l.db != nil {
+		go func(e SIEMEvent) {
+			_ = l.insertPostgres(context.Background(), e)
+		}(ev)
+	}
+}
+
+// RecordSync synchronously commits the audit log, returning an error if database persistence fails.
+func (l *Logger) RecordSync(ctx context.Context, ev SIEMEvent) error {
+	l.enrichEvent(&ev)
+
+	if l.logStdout {
+		b, err := json.Marshal(ev)
+		if err == nil {
+			fmt.Fprintln(os.Stdout, string(b))
+		}
+	}
+
+	if l.db != nil {
+		return l.insertPostgres(ctx, ev)
+	}
+	return nil
+}
+
+func (l *Logger) enrichEvent(ev *SIEMEvent) {
 	if ev.Timestamp == "" {
 		ev.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 	}
@@ -79,42 +121,33 @@ func (l *Logger) Record(ev SIEMEvent) {
 	if ev.Outcome == "" {
 		ev.Outcome = "success"
 	}
+}
 
-	// 1. Stream structured JSON to stdout for SIEM log shippers
-	if l.logStdout {
-		b, err := json.Marshal(ev)
-		if err == nil {
-			// Print directly to stdout without prefix so log forwarders parse clean JSON
-			fmt.Fprintln(os.Stdout, string(b))
-		}
+func (l *Logger) insertPostgres(ctx context.Context, e SIEMEvent) error {
+	detailBytes, _ := json.Marshal(e.Detail)
+	nowMilli := time.Now().UnixMilli()
+	query := `
+		INSERT INTO atm_audit_logs (
+			ts_milli, session_id, atm_id, event, outcome, client_ip, device_id, customer_ref, failure_reason, detail, request_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+	_, err := l.db.ExecContext(ctx, query,
+		nowMilli,
+		e.SessionID,
+		e.AtmID,
+		e.EventAction,
+		e.Outcome,
+		e.ClientIP,
+		e.DeviceID,
+		e.CustomerRef,
+		e.Reason,
+		detailBytes,
+		e.RequestID,
+	)
+	if err != nil {
+		log.Printf("[audit] Error writing to postgres audit_logs: %v", err)
+		return err
 	}
-
-	// 2. Insert into PostgreSQL if connected
-	if l.db != nil {
-		go func(e SIEMEvent) {
-			detailBytes, _ := json.Marshal(e.Detail)
-			nowMilli := time.Now().UnixMilli()
-			query := `
-				INSERT INTO atm_audit_logs (
-					ts_milli, session_id, atm_id, event, outcome, client_ip, device_id, customer_ref, failure_reason, detail
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
-			_, err := l.db.Exec(query,
-				nowMilli,
-				e.SessionID,
-				e.AtmID,
-				e.EventAction,
-				e.Outcome,
-				e.ClientIP,
-				e.DeviceID,
-				e.CustomerRef,
-				e.Reason,
-				detailBytes,
-			)
-			if err != nil {
-				log.Printf("[audit] Error writing to postgres audit_logs: %v", err)
-			}
-		}(ev)
-	}
+	return nil
 }
 
 func (l *Logger) Close() error {

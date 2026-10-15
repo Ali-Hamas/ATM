@@ -31,6 +31,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *httpapi.Handlers, *sessio
 		RSAPrivateKey:     key,
 		RSAPublicKey:      &key.PublicKey,
 		KeyID:             "test-key-id",
+		ATMAllowlist:      []string{"ATM-DEMO-001", "ATM-LONDON-01", "ATM-MAIN-001", "ATM-ACTUAL-001"},
 	}
 
 	store := session.NewStore()
@@ -81,7 +82,6 @@ func TestCreateSessionInvalidATMFormat(t *testing.T) {
 	ts, _, _, _ := setupTestServer(t)
 	defer ts.Close()
 
-	// Invalid format (does not match ATM-[A-Z0-9-]{1,32})
 	body := []byte(`{"atmId":"invalid_atm_lowercase!"}`)
 	res, err := http.Post(ts.URL+"/api/session", "application/json", bytes.NewBuffer(body))
 	if err != nil {
@@ -191,5 +191,50 @@ func TestSecurityHeadersPresent(t *testing.T) {
 	}
 	if res.Header.Get("Content-Security-Policy") == "" {
 		t.Errorf("missing Content-Security-Policy")
+	}
+}
+
+func TestErrorSecrecyOnInvalidToken(t *testing.T) {
+	ts, _, _, _ := setupTestServer(t)
+	defer ts.Close()
+
+	// Approve with garbage token
+	approveBody, _ := json.Marshal(map[string]string{
+		"qrToken":  "invalid.garbage.token",
+		"deviceId": "test-device",
+	})
+	res, err := http.Post(ts.URL+"/api/session/approve", "application/json", bytes.NewBuffer(approveBody))
+	if err != nil {
+		t.Fatalf("POST /api/session/approve failed: %v", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid token, got %d", res.StatusCode)
+	}
+
+	var data map[string]interface{}
+	_ = json.NewDecoder(res.Body).Decode(&data)
+	if data["error"] != "invalid_token" {
+		t.Errorf("expected error code 'invalid_token', got %v", data["error"])
+	}
+	// Verify no internal parser exception text is leaked in error response
+	if detail, ok := data["detail"].(string); ok && detail != "" {
+		t.Errorf("internal parser details leaked in response: %v", detail)
+	}
+}
+
+func TestReadyzEndpoint(t *testing.T) {
+	ts, _, _, _ := setupTestServer(t)
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/readyz")
+	if err != nil {
+		t.Fatalf("GET /api/readyz failed: %v", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK for readyz, got %d", res.StatusCode)
 	}
 }
