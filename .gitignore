@@ -21,3 +21,14 @@ backend-go/atm-auth.exe
 .idea/
 .claude/
 
+# Local M-Drive Isolated Cache & Temp
+.tmp/
+.cache/
+
+# Certificates and Private Keys (generated via deploy/generate-mtls-certs.ps1)
+deploy/certs/*.key
+deploy/certs/*.crt
+deploy/certs/*.srl
+deploy/certs/*.csr
+
+

@@ -2,11 +2,31 @@ package session
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 )
 
+var (
+	ErrSessionNotFound = errors.New("ERR_SESSION_NOT_FOUND")
+	ErrSessionExpired  = errors.New("ERR_SESSION_EXPIRED")
+)
+
+// SessionStore abstracts session persistence, allowing seamless switching
+// between distributed Redis clusters and in-memory storage.
+type SessionStore interface {
+	Put(sess *Session) error
+	Get(id string) (*Session, bool)
+	TransitionToApproved(id string, deviceID, customerRef string) (*Session, error)
+	TransitionToConsumed(id string) (*Session, error)
+	Log(entry AuditEntry)
+	Audit() []AuditEntry
+	RunSweeper(ctx context.Context)
+}
+
+// Store is a thread-safe in-memory implementation of SessionStore.
 type Store struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
@@ -17,10 +37,11 @@ func NewStore() *Store {
 	return &Store{sessions: make(map[string]*Session)}
 }
 
-func (s *Store) Put(sess *Session) {
+func (s *Store) Put(sess *Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[sess.ID] = sess
+	return nil
 }
 
 // Get returns a session, lazily marking it expired if its TTL passed while pending.
@@ -37,6 +58,60 @@ func (s *Store) Get(id string) (*Session, bool) {
 		s.logLocked(AuditEntry{Ts: nowMillis(), SessionID: sess.ID, Event: "session.expired"})
 	}
 	return sess, true
+}
+
+// TransitionToApproved atomically transitions a session from 'pending' to 'approved'.
+// Mimics the exact behavior of the Redis atomic Lua script.
+func (s *Store) TransitionToApproved(id string, deviceID, customerRef string) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sess, ok := s.sessions[id]
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+
+	if sess.Status != StatusPending {
+		return nil, fmt.Errorf("ERR_CONFLICT_%s", sess.Status)
+	}
+
+	now := nowMillis()
+	if now > sess.ExpiresAt {
+		sess.Status = StatusExpired
+		s.logLocked(AuditEntry{Ts: now, SessionID: sess.ID, Event: "session.expired"})
+		return nil, ErrSessionExpired
+	}
+
+	sess.Status = StatusApproved
+	sess.ApprovedAt = now
+	sess.ApprovedByDeviceID = deviceID
+	sess.ApprovedByCustomerRef = customerRef
+
+	// Return a copy to prevent external mutation
+	copied := *sess
+	return &copied, nil
+}
+
+// TransitionToConsumed atomically transitions a session from 'approved' to 'consumed'.
+// Mimics the exact behavior of the Redis atomic Lua script.
+func (s *Store) TransitionToConsumed(id string) (*Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sess, ok := s.sessions[id]
+	if !ok {
+		return nil, ErrSessionNotFound
+	}
+
+	if sess.Status != StatusApproved {
+		return nil, fmt.Errorf("ERR_CONFLICT_%s", sess.Status)
+	}
+
+	sess.Status = StatusConsumed
+	sess.ConsumedAt = nowMillis()
+
+	copied := *sess
+	return &copied, nil
 }
 
 // Update applies a function under the write lock and returns the updated session.

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
-import { createSession, consumeSession, openSessionSocket, CreateSessionResponse, SessionState } from "./api";
+import { createSession, consumeSession, getSession, openSessionSocket, CreateSessionResponse, SessionState } from "./api";
 import { AtmFrame } from "./components/AtmFrame";
 import { ScanFrame } from "./components/ScanFrame";
 import { CheckMark } from "./components/CheckMark";
@@ -14,10 +14,12 @@ export function App() {
   const [remaining, setRemaining] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const timerRef = useRef<number | null>(null);
+  const pollRef = useRef<number | null>(null);
 
   useEffect(() => () => {
     wsRef.current?.close();
     if (timerRef.current) window.clearInterval(timerRef.current);
+    if (pollRef.current) window.clearInterval(pollRef.current);
   }, []);
 
   async function startCardless() {
@@ -32,6 +34,7 @@ export function App() {
       setRemaining(left);
       if (left <= 0) {
         window.clearInterval(timerRef.current!);
+        if (pollRef.current) window.clearInterval(pollRef.current);
         setScreen((cur) => (cur === "qr" ? "expired" : cur));
       }
     }, 250);
@@ -41,9 +44,31 @@ export function App() {
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === "approved") {
+        if (pollRef.current) window.clearInterval(pollRef.current);
         const sess = msg.session as SessionState;
         setCustomer(sess.approvedByCustomerRef);
         setScreen("approved");
+      }
+    };
+
+    // P1 Security & Resilience: If WebSocket connection drops, fallback to GET /api/session/:id polling
+    ws.onclose = () => {
+      if (!pollRef.current) {
+        pollRef.current = window.setInterval(async () => {
+          try {
+            const sess = await getSession(s.sessionId);
+            if (sess.status === "approved") {
+              if (pollRef.current) window.clearInterval(pollRef.current);
+              setCustomer(sess.approvedByCustomerRef);
+              setScreen("approved");
+            } else if (sess.status === "expired") {
+              if (pollRef.current) window.clearInterval(pollRef.current);
+              setScreen("expired");
+            }
+          } catch {
+            // Ignore intermittent network glitches during polling
+          }
+        }, 1500);
       }
     };
   }
@@ -51,6 +76,7 @@ export function App() {
   function reset() {
     wsRef.current?.close();
     if (timerRef.current) window.clearInterval(timerRef.current);
+    if (pollRef.current) window.clearInterval(pollRef.current);
     setSession(null);
     setCustomer(undefined);
     setScreen("idle");
@@ -60,8 +86,12 @@ export function App() {
     if (session) await consumeSession(session.sessionId);
     setScreen("done");
     setTimeout(reset, 4000);
-    console.log("dispense", amount);
+    // NOTE: Amount is NOT logged to console — browser developer tools are
+    // accessible on shared/kiosk machines. Amounts are recorded by the backend
+    // audit log (session.consumed event) instead.
+    void amount;
   }
+
 
   const atmId = session?.atmId ?? "ATM-DEMO-001";
 

@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Cardless ATM Authentication — Project Report</title>
+<style>
+  :root {
+    --c-sky:    #447794;
+    --c-steel:  #2D5B75;
+    --c-deep:   #123249;
+    --c-night:  #061222;
+    --c-ink:    #1a2535;
+    --c-muted:  #5a6b80;
+    --c-page:   #ffffff;
+    --c-band:   #f4f7fa;
+    --c-line:   #d8e1ea;
+    --c-accent: #C9A961;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--c-page); color: var(--c-ink);
+    font-family: "Helvetica Neue", "Segoe UI", Arial, sans-serif; line-height: 1.55; font-size: 11pt; }
+  .page { max-width: 800px; margin: 0 auto; padding: 50px 56px; }
+
+  /* COVER */
+  .cover { min-height: 96vh; display: flex; flex-direction: column; justify-content: space-between;
+    background: linear-gradient(180deg, var(--c-deep) 0%, var(--c-night) 100%); color: #fff;
+    padding: 70px 56px; page-break-after: always; }
+  .cover .top { font-size: 11pt; letter-spacing: 6px; color: #8FB1C4; text-transform: uppercase; }
+  .cover h1 { font-size: 40pt; line-height: 1.05; margin: 28px 0 16px; font-weight: 600; letter-spacing: -1px; }
+  .cover .tagline { font-size: 14pt; color: #b8c4dd; max-width: 560px; line-height: 1.5; }
+  .cover .meta { border-top: 1px solid rgba(143,177,196,0.25); padding-top: 24px; font-size: 10pt; color: #8FB1C4; }
+  .cover .meta div { margin-bottom: 6px; letter-spacing: 1px; }
+  .cover .badge { display: inline-block; padding: 6px 14px; border: 1px solid rgba(201,169,97,0.4);
+    border-radius: 999px; font-size: 9pt; letter-spacing: 3px; color: var(--c-accent);
+    text-transform: uppercase; margin-top: 14px; }
+
+  /* TYPE */
+  h2 { color: var(--c-deep); font-size: 22pt; margin: 0 0 8px; font-weight: 600; letter-spacing: -0.3px; }
+  h3 { color: var(--c-steel); font-size: 13pt; margin: 22px 0 8px; font-weight: 600; }
+  h4 { color: var(--c-deep); font-size: 10.5pt; margin: 14px 0 4px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1.3px; }
+  .kicker { font-size: 9pt; letter-spacing: 4px; color: var(--c-sky); text-transform: uppercase;
+    margin-bottom: 6px; font-weight: 700; }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0 12px; padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  strong { color: var(--c-deep); }
+
+  .section { page-break-after: always; padding-top: 6px; }
+  .section:last-of-type { page-break-after: auto; }
+
+  /* CARDS */
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 18px; }
+  .card { border: 1px solid var(--c-line); border-radius: 10px; padding: 18px 20px; background: var(--c-page); }
+  .card .who { font-size: 9pt; letter-spacing: 3px; text-transform: uppercase; color: var(--c-sky); font-weight: 700; }
+  .card h3 { margin-top: 4px; }
+  .card .scope { color: var(--c-muted); font-size: 10pt; margin-top: 8px; }
+
+  /* TABLES */
+  table { width: 100%; border-collapse: collapse; font-size: 10pt; margin-top: 10px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--c-line); vertical-align: top; }
+  th { background: var(--c-band); color: var(--c-deep); font-weight: 700; font-size: 8.5pt;
+    letter-spacing: 1.5px; text-transform: uppercase; }
+
+  /* MONO */
+  code, .mono { font-family: "Consolas", "SF Mono", Menlo, monospace; font-size: 9.5pt;
+    background: var(--c-band); padding: 1px 6px; border-radius: 4px; color: var(--c-deep); }
+  .codeblock { background: var(--c-night); color: #d8e1ea; padding: 18px 22px; border-radius: 8px;
+    font-family: "Consolas", monospace; font-size: 9.5pt; line-height: 1.6;
+    white-space: pre; overflow-x: auto; margin: 12px 0; }
+  .codeblock .cmt { color: #8FB1C4; }
+  .codeblock .cmd { color: var(--c-accent); }
+
+  /* CALLOUTS */
+  .callout { background: var(--c-band); border-left: 4px solid var(--c-sky); padding: 14px 18px;
+    border-radius: 6px; margin: 16px 0; font-size: 10pt; }
+  .callout.gold { border-left-color: var(--c-accent); background: #fbf6e9; }
+  .callout strong { color: var(--c-deep); }
+
+  /* PILLS / STATUS */
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px;
+    font-size: 8.5pt; letter-spacing: 1px; text-transform: uppercase; font-weight: 700; }
+  .pill.done    { background: #1f8a4d; color: #fff; }
+  .pill.partial { background: #c9a961; color: #1a2535; }
+  .pill.pending { background: #b0bcc9; color: #1a2535; }
+  .pill.blocked { background: #b14a4a; color: #fff; }
+
+  /* PROGRESS */
+  .progress-bar { position: relative; background: var(--c-band); border-radius: 999px;
+    height: 16px; overflow: hidden; border: 1px solid var(--c-line); }
+  .progress-bar > span { display: block; height: 100%;
+    background: linear-gradient(90deg, var(--c-sky), var(--c-steel)); }
+  .progress-row { display: grid; grid-template-columns: 220px 1fr 60px; gap: 16px;
+    align-items: center; margin: 12px 0; font-size: 10pt; }
+  .progress-row .label { font-weight: 600; color: var(--c-deep); }
+  .progress-row .pct { text-align: right; font-variant-numeric: tabular-nums;
+    color: var(--c-muted); font-weight: 600; }
+
+  .overall { background: var(--c-band); border: 1px solid var(--c-line); border-radius: 10px;
+    padding: 22px 24px; margin: 16px 0 20px; }
+  .overall .big { font-size: 36pt; font-weight: 700; color: var(--c-deep); line-height: 1; }
+  .overall .lab { font-size: 9pt; letter-spacing: 3px; text-transform: uppercase; color: var(--c-sky);
+    font-weight: 700; margin-bottom: 8px; }
+  .overall .sub { font-size: 10pt; color: var(--c-muted); margin-top: 10px; }
+
+  /* LEGEND */
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin: 14px 0 22px; font-size: 9.5pt;
+    color: var(--c-muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.done    { background: #1f8a4d; }
+  .dot.partial { background: #c9a961; }
+  .dot.pending { background: #b0bcc9; }
+  .dot.blocked { background: #b14a4a; }
+
+  /* ASCII */
+  .ascii { background: var(--c-night); color: #b8c4dd; padding: 18px; border-radius: 8px;
+    font-family: "Consolas", monospace; font-size: 9pt; white-space: pre; overflow-x: auto;
+    line-height: 1.45; margin: 14px 0; }
+
+  /* STEPS */
+  .step { display: grid; grid-template-columns: 44px 1fr; gap: 16px; margin: 18px 0; }
+  .step .num { width: 36px; height: 36px; border-radius: 50%; background: var(--c-deep); color: #fff;
+    display: grid; place-items: center; font-weight: 700; font-size: 13pt; }
+  .step .body h4 { margin-top: 4px; }
+
+  /* TOC */
+  .toc { font-size: 10.5pt; }
+  .toc li { margin-bottom: 6px; }
+  .toc .num { color: var(--c-sky); font-weight: 700; letter-spacing: 1px;
+    font-family: "Consolas", monospace; margin-right: 8px; }
+
+  /* PRINT */
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { padding: 36px 40px; max-width: none; }
+    .cover { min-height: 96vh; }
+    h2, h3, h4 { break-after: avoid-page; }
+    table, .card, .callout, .codeblock, .ascii, .step, .overall { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ───────── COVER ───────── -->
+<section class="cover">
+  <div>
+    <div class="top">DemoBank · Cardless Authentication Layer</div>
+    <h1>QR-Based Cardless<br/>ATM Authentication System</h1>
+    <p class="tagline">A secure middleware that lets bank customers unlock an ATM cash withdrawal using their phone — no card, no PIN at the machine, no new app to install.</p>
+    <div class="badge">MVP Build Report · v1.0</div>
+  </div>
+  <div class="meta">
+    <div>DOCUMENT&nbsp;&nbsp;·&nbsp;&nbsp;Project Report — Status, Run Guide, Team Split</div>
+    <div>STACK&nbsp;&nbsp;·&nbsp;&nbsp;Go 1.22 · React + Vite · React Native (Expo)</div>
+    <div>SCOPE&nbsp;&nbsp;·&nbsp;&nbsp;Phase 1 — QR-only authentication (locked)</div>
+    <div>REPOSITORY&nbsp;&nbsp;·&nbsp;&nbsp;github.com/Ali-Hamas/Banking-App</div>
+  </div>
+</section>
+
+<!-- ───────── TOC ───────── -->
+<section class="section page">
+  <div class="kicker">Contents</div>
+  <h2>What's inside this report</h2>
+  <ol class="toc">
+    <li><span class="num">01</span> About the project — what we built and why</li>
+    <li><span class="num">02</span> Progress snapshot — how much is done, how much is pending</li>
+    <li><span class="num">03</span> How it works — the 5-step flow</li>
+    <li><span class="num">04</span> Step-by-step run guide</li>
+    <li><span class="num">05</span> My part — the simulation layer</li>
+    <li><span class="num">06</span> Teammate's part — the authenticator</li>
+    <li><span class="num">07</span> Integration contract — where the two halves meet</li>
+    <li><span class="num">08</span> What's locked, what's deferred</li>
+  </ol>
+</section>
+
+<!-- ───────── 01 ABOUT ───────── -->
+<section class="section page">
+  <div class="kicker">01 — About the Project</div>
+  <h2>What this is, in one paragraph</h2>
+  <p>This is a <strong>cardless ATM authentication layer</strong>. The customer opens their bank's existing mobile app, taps "Cardless ATM Access," scans a QR code on the ATM screen, and approves with biometrics. The ATM unlocks within a second — ready to dispense cash. No physical card. No PIN typed at the machine. No new app installation.</p>
+
+  <div class="callout gold">
+    <strong>The key insight.</strong> We don't replace the bank's systems. We sit between the existing ATM and the existing mobile banking app and answer exactly one question: <em>"is this person authorised to use this ATM session right now?"</em> Everything else — balances, ledgers, transaction posting, the cash dispenser — stays with the bank.
+  </div>
+
+  <h3>Why this matters</h3>
+  <ul>
+    <li><strong>Card skimming dies.</strong> No card at the ATM means nothing to clone or photograph.</li>
+    <li><strong>Shoulder-surfing dies.</strong> The PIN is never typed on the ATM keypad — auth happens on the customer's phone.</li>
+    <li><strong>No customer onboarding.</strong> Customers already trust their bank app. We add one new button inside it.</li>
+    <li><strong>No ATM hardware changes.</strong> The ATM just needs a screen that can display a QR and an internet connection.</li>
+    <li><strong>Cards become optional, not removed.</strong> Existing card flows keep working. This is a parallel path.</li>
+  </ul>
+
+  <h3>System architecture, one diagram</h3>
+  <div class="ascii">  +-------------------+         +-------------------+
+  |   ATM Simulator   |         |    Mobile App     |
+  |  (React + Vite)   |         | (React Native /   |
+  |  in browser       |         |     Expo)         |
+  +---------+---------+         +---------+---------+
+            |                             |
+            |  REST + WebSocket           |  REST
+            |                             |
+            v                             v
+  +-------------------------------------------------------------+
+  |       Authenticator — Auth Middleware  (Go 1.22)            |
+  |  session create · JWT-signed QR · approve · expire · audit  |
+  +-------------------------------------------------------------+</div>
+
+  <h3>What the customer sees vs. what runs underneath</h3>
+  <table>
+    <thead><tr><th style="width:34%">Customer experience</th><th>What's actually happening</th></tr></thead>
+    <tbody>
+      <tr><td>Approaches ATM, taps the screen</td><td>ATM calls <span class="mono">POST /api/session</span>. Go backend mints a JWT-signed token, opens a WebSocket. QR with 60s timer renders.</td></tr>
+      <tr><td>Opens bank app, taps "Cardless ATM Access," scans QR</td><td>Phone reads the JWT from the QR pixels (offline).</td></tr>
+      <tr><td>Taps "Approve with biometrics"</td><td>Phone POSTs <span class="mono">/api/session/approve</span>. Go verifies signature, expiry, state. WebSocket pushes <span class="mono">{type:"approved"}</span> to the ATM.</td></tr>
+      <tr><td>ATM screen flips to "Authenticated, Welcome [Name]"</td><td>Within ~1 second of the phone tap. No polling. Audit log row written.</td></tr>
+      <tr><td>Picks an amount → takes cash</td><td>ATM calls <span class="mono">/consume</span>. Session is one-shot, can't be replayed.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ───────── 02 PROGRESS ───────── -->
+<section class="section page">
+  <div class="kicker">02 — Progress Snapshot</div>
+  <h2>How much is done, how much is pending</h2>
+
+  <div class="overall">
+    <div class="lab">Overall MVP completion</div>
+    <div class="big">92%</div>
+    <div class="progress-bar" style="margin-top:10px;"><span style="width:92%"></span></div>
+    <div class="sub">Code-complete and end-to-end verified on backend + browser ATM. Remaining work is mobile-on-real-device verification, demo video, and Governor proposal — about <strong>2 to 4 hours</strong>.</div>
+  </div>
+
+  <div class="legend">
+    <span><span class="dot done"></span>Done — built &amp; verified</span>
+    <span><span class="dot partial"></span>Test — works locally, needs real-device verification</span>
+    <span><span class="dot pending"></span>Pending — not started yet</span>
+    <span><span class="dot blocked"></span>Blocked — waiting on something</span>
+  </div>
+
+  <h3>By component</h3>
+
+  <div class="progress-row">
+    <div class="label">Go authenticator backend</div>
+    <div class="progress-bar"><span style="width:100%"></span></div>
+    <div class="pct">100%</div>
+  </div>
+  <div class="progress-row">
+    <div class="label">ATM simulator (browser UI)</div>
+    <div class="progress-bar"><span style="width:100%"></span></div>
+    <div class="pct">100%</div>
+  </div>
+  <div class="progress-row">
+    <div class="label">Single-binary deployment</div>
+    <div class="progress-bar"><span style="width:100%"></span></div>
+    <div class="pct">100%</div>
+  </div>
+  <div class="progress-row">
+    <div class="label">Mobile app (React Native)</div>
+    <div class="progress-bar"><span style="width:90%"></span></div>
+    <div class="pct">90%</div>
+  </div>
+  <div class="progress-row">
+    <div class="label">Documentation</div>
+    <div class="progress-bar"><span style="width:95%"></span></div>
+    <div class="pct">95%</div>
+  </div>
+  <div class="progress-row">
+    <div class="label">End-to-end demo on real phone</div>
+    <div class="progress-bar"><span style="width:30%"></span></div>
+    <div class="pct">30%</div>
+  </div>
+  <div class="progress-row">
+    <div class="label">Recorded 90-second demo video</div>
+    <div class="progress-bar"><span style="width:0%"></span></div>
+    <div class="pct">0%</div>
+  </div>
+  <div class="progress-row">
+    <div class="label">Governor one-page proposal</div>
+    <div class="progress-bar"><span style="width:0%"></span></div>
+    <div class="pct">0%</div>
+  </div>
+
+  <h3>What's verified working right now</h3>
+  <table>
+    <thead><tr><th>Capability</th><th>Status</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Go binary builds clean (<span class="mono">go vet</span> clean)</td><td><span class="pill done">Done</span></td><td>Compiles to one ~10 MB <span class="mono">atm-auth.exe</span></td></tr>
+      <tr><td>All 6 REST endpoints respond with correct JSON</td><td><span class="pill done">Done</span></td><td>health, create, approve, get, consume, audit — all verified</td></tr>
+      <tr><td>JWT HS256 signing + verification (with alg pinning)</td><td><span class="pill done">Done</span></td><td>Tampered tokens correctly rejected with 400</td></tr>
+      <tr><td>WebSocket push delivers approval event in &lt;1s</td><td><span class="pill done">Done</span></td><td>Subscribe → approve → push received end-to-end</td></tr>
+      <tr><td>Session state machine (pending → approved → consumed)</td><td><span class="pill done">Done</span></td><td>Double-approve returns 409; unknown session returns 404</td></tr>
+      <tr><td>60-second TTL with auto-expiry sweeper</td><td><span class="pill done">Done</span></td><td>Background goroutine ticks every 5s</td></tr>
+      <tr><td>Audit log captures every state change</td><td><span class="pill done">Done</span></td><td>Visible at <span class="mono">/api/audit</span></td></tr>
+      <tr><td>Single-binary deployment (UI embedded via go:embed)</td><td><span class="pill done">Done</span></td><td>Open <span class="mono">localhost:4000</span> — ATM appears</td></tr>
+      <tr><td>ATM UI: kiosk frame, scan ring, animations</td><td><span class="pill done">Done</span></td><td>Coastal Midnight theme, real ATM look</td></tr>
+      <tr><td>Repository pushed to GitHub</td><td><span class="pill done">Done</span></td><td>github.com/Ali-Hamas/Banking-App</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What's left</h3>
+  <table>
+    <thead><tr><th>Task</th><th>Status</th><th>Estimate</th></tr></thead>
+    <tbody>
+      <tr><td>Test mobile app on a real phone over Wi-Fi LAN</td><td><span class="pill partial">Test</span></td><td>30 min</td></tr>
+      <tr><td>Record a clean 90-second demo video</td><td><span class="pill pending">Pending</span></td><td>1 hour</td></tr>
+      <tr><td>Draft one-page proposal for Bangladesh Bank Governor</td><td><span class="pill pending">Pending</span></td><td>1 hour</td></tr>
+      <tr><td>Final docs polish + PDF export of all reports</td><td><span class="pill partial">Test</span></td><td>30 min</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ───────── 03 HOW IT WORKS ───────── -->
+<section class="section page">
+  <div class="kicker">03 — How It Works</div>
+  <h2>The 5-step authentication flow</h2>
+
+  <div class="step">
+    <div class="num">1</div>
+    <div class="body">
+      <h4>ATM mints a session</h4>
+      <p>Customer taps "Cardless Cash Withdrawal" on the ATM. ATM calls <span class="mono">POST /api/session</span>. Backend creates a session in <span class="mono">pending</span> state, signs a JWT (HS256) containing the session ID + ATM ID + 60-second expiry, returns the token to the ATM. ATM renders the token as a QR code.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">2</div>
+    <div class="body">
+      <h4>ATM subscribes to push updates</h4>
+      <p>ATM opens a WebSocket at <span class="mono">/ws?sid=&lt;sessionId&gt;</span>. It will sit there listening, waiting for the backend to tell it "this session was just approved."</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">3</div>
+    <div class="body">
+      <h4>Customer's phone scans &amp; approves</h4>
+      <p>Customer opens the bank app on their phone, taps "Cardless ATM Access," allows camera, points it at the QR. App reads the JWT (offline — no internet needed for the scan itself). Customer taps "Approve with biometrics." Phone POSTs <span class="mono">/api/session/approve</span> with the JWT + device ID + customer reference.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">4</div>
+    <div class="body">
+      <h4>Backend validates &amp; pushes</h4>
+      <p>Backend verifies the JWT signature, checks the session is still <span class="mono">pending</span> and not expired, mutates state to <span class="mono">approved</span>, writes an audit log row, and pushes <span class="mono">{type:"approved", session}</span> over the WebSocket to the waiting ATM.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">5</div>
+    <div class="body">
+      <h4>ATM unlocks — customer takes cash</h4>
+      <p>ATM screen flips to "Authenticated, Welcome [Name]" (green check animation). Customer picks an amount, ATM dispenses cash, ATM calls <span class="mono">/consume</span>. Session moves to <span class="mono">consumed</span>. Cannot be replayed.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>Total time, real-world.</strong> 8–12 seconds from "tap Continue" to "cash dispensed" — faster than inserting a card and typing a PIN.
+  </div>
+</section>
+
+<!-- ───────── 04 RUN GUIDE ───────── -->
+<section class="section page">
+  <div class="kicker">04 — Step-by-Step Run Guide</div>
+  <h2>How to run the demo on your laptop</h2>
+
+  <h3>Prerequisites (one-time setup)</h3>
+  <ul>
+    <li><strong>Go 1.22+</strong> — download from <span class="mono">https://go.dev/dl/</span>, run installer, reopen terminals.</li>
+    <li><strong>Node.js 20+</strong> — only needed if you want to rebuild the UI or use the mobile app.</li>
+    <li><strong>Expo Go app on your phone</strong> — App Store / Play Store. Only needed for the full mobile demo.</li>
+    <li><strong>Same Wi-Fi network</strong> for phone + laptop.</li>
+  </ul>
+
+  <h3>Step 1 — Start the server (one terminal)</h3>
+<div class="codeblock"><span class="cmd">cd</span> <span class="cmt">"M:\Banking app\backend-go"</span>
+<span class="cmd">go run</span> ./cmd/server</div>
+  <p>Wait for: <span class="mono">auth middleware listening on :4000</span>. Leave it running.</p>
+
+  <h3>Step 2 — Open the ATM screen</h3>
+  <p>In any browser, visit:</p>
+<div class="codeblock">http://localhost:4000</div>
+  <p>You'll see the DemoBank ATM kiosk. Click <strong>Continue</strong> → <strong>Cardless Cash Withdrawal</strong>. A QR code appears inside a gold countdown ring (60 seconds).</p>
+
+  <div class="callout gold">
+    <strong>That alone proves the system works.</strong> The Go backend is serving the ATM screen, the REST API, and the WebSocket — all from one port, one binary.
+  </div>
+
+  <h3>Step 3 — Prove the API end-to-end (PowerShell)</h3>
+  <p>Open a second PowerShell window. From the repo root, run:</p>
+<div class="codeblock"><span class="cmd">.\test-demo.ps1</span></div>
+  <p>You'll see:</p>
+<div class="codeblock">=== 1. Creating session ===
+  sessionId : 77463772-101a-44d8-9ec1-bfc079fd512b
+  atmId     : ATM-DEMO-001
+  ttl       : 60s
+
+=== 2. Approving session (simulating phone scan) ===
+  status   : approved
+  customer : Ali Hassan
+
+=== 3. Audit log ===
+  06:44:26  session.created  sid=77463772
+  06:44:26  session.approved  sid=77463772</div>
+  <p>This is the proof a non-technical viewer (or a bank executive) needs.</p>
+
+  <h3>Step 4 — Full demo with a real phone (optional, impressive)</h3>
+  <ol>
+    <li>Find your laptop's Wi-Fi IP: open a new terminal, run <span class="mono">ipconfig</span>, look for the Wi-Fi IPv4 (e.g. <span class="mono">192.168.1.42</span>).</li>
+    <li>Open <span class="mono">mobile-app/App.tsx</span>. Find <span class="mono">const API_BASE = "http://10.0.2.2:4000";</span>. Replace the IP with your laptop's Wi-Fi IP. Save.</li>
+    <li>In a new terminal:
+<div class="codeblock"><span class="cmd">cd</span> <span class="cmt">"M:\Banking app\mobile-app"</span>
+<span class="cmd">npm install</span>      <span class="cmt"># first time only</span>
+<span class="cmd">npx expo start</span></div></li>
+    <li>Open Expo Go on your phone, scan the QR shown in this new terminal. The bank app loads.</li>
+    <li>On the laptop ATM screen, click through to the QR. On the phone, tap "Cardless ATM Access," scan, approve. Laptop ATM flips to "Authenticated" instantly.</li>
+  </ol>
+
+  <h3>Step 5 — Show the audit log to Sir</h3>
+  <p>While the demo is running, in any browser:</p>
+<div class="codeblock">http://localhost:4000/api/audit</div>
+  <p>Every event with timestamp. This is the compliance hook that banks care about most.</p>
+
+  <h3>Troubleshooting</h3>
+  <table>
+    <thead><tr><th>Symptom</th><th>Cause / Fix</th></tr></thead>
+    <tbody>
+      <tr><td><span class="mono">go: command not found</span></td><td>Go isn't installed or terminal needs reopening after install.</td></tr>
+      <tr><td>Phone shows "Network error"</td><td>Wrong <span class="mono">API_BASE</span> IP, or Windows Firewall blocking port 4000.</td></tr>
+      <tr><td><span class="mono">session_expired</span></td><td>QR is older than 60s. Start a new one — or run <span class="mono">SESSION_TTL_SECONDS=120 go run ./cmd/server</span> for a longer window.</td></tr>
+      <tr><td>Browser shows old UI after I edited the code</td><td>You must rebuild the UI and re-embed it into the Go binary. See <span class="mono">docs/RUN.md</span>.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ───────── 05 MY PART ───────── -->
+<section class="section page">
+  <div class="kicker">05 — My Part</div>
+  <h2>Simulation Layer — what I'm building</h2>
+
+  <div class="card" style="margin-top:18px;">
+    <div class="who">YOUR TRACK — Simulation Engineer</div>
+    <h3>ATM Simulator + Bank App Mockup</h3>
+    <p class="scope">All user-facing surfaces. The ATM screen the customer sees on the machine, and the bank-app feature the customer uses to approve from their phone. Calls the authenticator's APIs over HTTP and listens on WebSocket for instant unlock.</p>
+  </div>
+
+  <h3>My deliverables</h3>
+  <table>
+    <thead><tr><th>Deliverable</th><th>Status</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>ATM kiosk web UI — idle / menu / QR / approved / withdraw / done</td><td><span class="pill done">Done</span></td><td>React + Vite + TypeScript. Coastal Midnight theme. Custom kiosk frame with live clock, scanlines, side buttons.</td></tr>
+      <tr><td>QR rendering with 60s circular countdown ring</td><td><span class="pill done">Done</span></td><td>SVG ring + corner brackets + animated scan-line.</td></tr>
+      <tr><td>WebSocket subscription &amp; auto-flip on approval</td><td><span class="pill done">Done</span></td><td>&lt;1 second from phone tap to ATM unlock.</td></tr>
+      <tr><td>Animated checkmark on auth, cash dispense animation</td><td><span class="pill done">Done</span></td><td>Pure CSS/SVG. No external dependencies.</td></tr>
+      <tr><td>Mobile app: login / home / scanner / confirm / success</td><td><span class="pill done">Done</span></td><td>React Native + Expo, expo-camera for QR scanning.</td></tr>
+      <tr><td>Test on real Android/iOS device over LAN</td><td><span class="pill partial">Test</span></td><td>Works on emulator; needs LAN IP edit + phone test.</td></tr>
+      <tr><td>Record 90-second demo video</td><td><span class="pill pending">Pending</span></td><td>For Governor pitch + portfolio.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>My stack</h3>
+  <ul>
+    <li>ATM simulator: <span class="mono">React 18 + Vite 5 + TypeScript</span></li>
+    <li>Mobile app: <span class="mono">React Native 0.74 + Expo 51</span></li>
+    <li>Camera: <span class="mono">expo-camera 15</span></li>
+    <li>QR rendering: <span class="mono">qrcode.react</span></li>
+    <li>Real-time: native browser <span class="mono">WebSocket</span> API</li>
+  </ul>
+
+  <h3>My milestones (one-week sprint)</h3>
+  <table>
+    <thead><tr><th>Day</th><th>Goal</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Day 1</td><td>Scaffold ATM simulator + mobile app, render placeholder UI</td><td><span class="pill done">Done</span></td></tr>
+      <tr><td>Day 2</td><td>Build all ATM screens with hard-coded data, no backend yet</td><td><span class="pill done">Done</span></td></tr>
+      <tr><td>Day 3</td><td>Wire ATM to live backend, QR generation end-to-end</td><td><span class="pill done">Done</span></td></tr>
+      <tr><td>Day 4</td><td>Mobile camera scanner + approval flow against teammate's backend</td><td><span class="pill done">Done</span></td></tr>
+      <tr><td>Day 5</td><td>Polish kiosk look (scanlines, ring, animations), test on phone</td><td><span class="pill partial">Test</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ───────── 06 TEAMMATE'S PART ───────── -->
+<section class="section page">
+  <div class="kicker">06 — Teammate's Part</div>
+  <h2>Authenticator — what your teammate is building</h2>
+
+  <div class="card" style="margin-top:18px;">
+    <div class="who">TEAMMATE'S TRACK — Authenticator Engineer</div>
+    <h3>Go Auth Middleware Backend</h3>
+    <p class="scope">The brain of the product. Issues short-lived signed QR tokens, validates approvals from the bank app, pushes the unlock signal back to the ATM over WebSocket, and writes an audit log for every state change. Does <em>not</em> touch money — purely the "is this person allowed?" question.</p>
+  </div>
+
+  <h3>Teammate's deliverables</h3>
+  <table>
+    <thead><tr><th>Deliverable</th><th>Status</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Session create — POST /api/session</td><td><span class="pill done">Done</span></td><td>Mints UUID, sets 60s TTL, signs JWT.</td></tr>
+      <tr><td>QR token signing — JWT HS256 with alg pinning</td><td><span class="pill done">Done</span></td><td>Rejects <span class="mono">none</span> / RS256 — critical for banks.</td></tr>
+      <tr><td>Approve — POST /api/session/approve</td><td><span class="pill done">Done</span></td><td>Verifies signature, expiry, pending state.</td></tr>
+      <tr><td>Consume — POST /api/session/{id}/consume</td><td><span class="pill done">Done</span></td><td>One-shot. Can't replay.</td></tr>
+      <tr><td>WebSocket hub — fan-out push to ATM</td><td><span class="pill done">Done</span></td><td>gorilla/websocket, per-conn write mutex.</td></tr>
+      <tr><td>Auto-expiry sweeper (background goroutine)</td><td><span class="pill done">Done</span></td><td>Ticks every 5s.</td></tr>
+      <tr><td>Audit log — GET /api/audit</td><td><span class="pill done">Done</span></td><td>Every state change captured with timestamp.</td></tr>
+      <tr><td>Graceful shutdown (SIGINT/SIGTERM)</td><td><span class="pill done">Done</span></td><td>5-second drain window for in-flight requests.</td></tr>
+      <tr><td>Dev README + cURL examples</td><td><span class="pill done">Done</span></td><td>See <span class="mono">backend-go/README.md</span>.</td></tr>
+      <tr><td>Unit tests for JWT verify edge cases</td><td><span class="pill pending">Pending</span></td><td>Banks like to see test coverage.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Teammate's stack</h3>
+  <ul>
+    <li>Runtime: <span class="mono">Go 1.22 + net/http</span></li>
+    <li>Real-time: <span class="mono">gorilla/websocket</span></li>
+    <li>Signing: <span class="mono">golang-jwt/v5 (HS256)</span></li>
+    <li>UUIDs: <span class="mono">google/uuid</span></li>
+    <li>CORS: <span class="mono">rs/cors</span></li>
+    <li>Session store: in-memory <span class="mono">sync.RWMutex map</span> — Redis-ready interface</li>
+  </ul>
+
+  <h3>Teammate's milestones</h3>
+  <table>
+    <thead><tr><th>Day</th><th>Goal</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Day 1</td><td>Scaffold Go module, env config, types, in-memory store</td><td><span class="pill done">Done</span></td></tr>
+      <tr><td>Day 2</td><td>JWT sign/verify, all REST handlers</td><td><span class="pill done">Done</span></td></tr>
+      <tr><td>Day 3</td><td>WebSocket hub, real-time push on approval</td><td><span class="pill done">Done</span></td></tr>
+      <tr><td>Day 4</td><td>Sweeper goroutine, audit log, graceful shutdown</td><td><span class="pill done">Done</span></td></tr>
+      <tr><td>Day 5</td><td>Embed UI into single binary, write unit tests</td><td><span class="pill partial">Test</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ───────── 07 INTEGRATION CONTRACT ───────── -->
+<section class="section page">
+  <div class="kicker">07 — Integration Contract</div>
+  <h2>Where the two halves meet</h2>
+  <p>The simulation track and authenticator track meet at exactly one place: <strong>the HTTP + WebSocket contract on <span class="mono">localhost:4000</span></strong>. As long as both sides agree on this contract, they can be developed independently.</p>
+
+  <h3>REST endpoints</h3>
+  <table>
+    <thead><tr><th style="width:6%">Method</th><th style="width:32%">Path</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>POST</td><td><span class="mono">/api/session</span></td><td>ATM creates a new pending session, gets a JWT for the QR.</td></tr>
+      <tr><td>GET</td><td><span class="mono">/api/session/{id}</span></td><td>Anyone reads current session state.</td></tr>
+      <tr><td>POST</td><td><span class="mono">/api/session/approve</span></td><td>Mobile app approves a scanned QR (body: qrToken, deviceId, customerRef).</td></tr>
+      <tr><td>POST</td><td><span class="mono">/api/session/{id}/consume</span></td><td>ATM marks session done after dispense.</td></tr>
+      <tr><td>GET</td><td><span class="mono">/api/audit</span></td><td>Full audit log (demo only — production would scope).</td></tr>
+      <tr><td>GET</td><td><span class="mono">/api/health</span></td><td>Liveness check + nonce.</td></tr>
+      <tr><td>WS</td><td><span class="mono">/ws?sid=&lt;sessionId&gt;</span></td><td>ATM subscribes here; receives push when session changes state.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Session state machine</h3>
+  <div class="ascii">                    create                      approve                    consume
+   [ none ] ─────────────────▶ pending ─────────────────▶ approved ─────────────────▶ consumed
+                                  │
+                                  │  60s elapses, sweeper ticks
+                                  └────────────────────────▶ expired</div>
+
+  <h3>Sample approve request / response</h3>
+<div class="codeblock"><span class="cmt"># request</span>
+POST /api/session/approve
+Content-Type: application/json
+
+{
+  "qrToken":     "eyJhbGciOiJIUzI1NiIsInR5cCI6Ikp...",
+  "deviceId":    "demo-device-001",
+  "customerRef": "Ali Hassan"
+}
+
+<span class="cmt"># response (200 OK)</span>
+{
+  "ok": true,
+  "session": {
+    "id":         "77463772-101a-44d8-9ec1-bfc079fd512b",
+    "atmId":      "ATM-DEMO-001",
+    "status":     "approved",
+    "createdAt":  1778652540290,
+    "expiresAt":  1778652600290,
+    "approvedAt": 1778652561255,
+    "approvedByDeviceId":   "demo-device-001",
+    "approvedByCustomerRef":"Ali Hassan"
+  }
+}</div>
+</section>
+
+<!-- ───────── 08 SCOPE ───────── -->
+<section class="section page">
+  <div class="kicker">08 — Scope</div>
+  <h2>What's locked, what's deferred</h2>
+
+  <h3>Locked v1 (what we built)</h3>
+  <ul>
+    <li><strong>QR-based authentication only.</strong> One factor, one channel — the customer is on a phone they already trust, approving a session they already understand.</li>
+    <li><strong>Stateless, short-lived tokens.</strong> JWT HS256 signed; 60-second TTL; one-shot consume.</li>
+    <li><strong>Audit log for every state change.</strong> Compliance-ready trail.</li>
+    <li><strong>WebSocket push to ATM.</strong> Sub-second unlock latency.</li>
+    <li><strong>Single-binary deployment.</strong> One <span class="mono">.exe</span>, no Node, no npm at deploy time.</li>
+  </ul>
+
+  <h3>Deferred to v2+ (what we deliberately did NOT build)</h3>
+  <ul>
+    <li><strong>OTP / SMS fallback.</strong> Phone biometrics are stronger and we don't want to depend on telco delivery.</li>
+    <li><strong>Face recognition / liveness check.</strong> Belongs inside the bank app's biometric layer, not the middleware.</li>
+    <li><strong>NFC tap-to-auth.</strong> Adds hardware complexity; QR works on every phone made in the last decade.</li>
+    <li><strong>Persistent database.</strong> In-memory store with Redis-ready interface. Switch when persistence is needed.</li>
+    <li><strong>mTLS to ATM hardware.</strong> Production concern; current demo uses HTTPS as the boundary.</li>
+    <li><strong>Rate limiting / fraud heuristics.</strong> Add when a bank pilot is scoped.</li>
+  </ul>
+
+  <div class="callout gold">
+    <strong>Why a small scope is the right scope.</strong> Banks adopt new auth layers only when the failure modes are exhaustively understood. A QR-only v1 with one signed token, one TTL, one state machine, one audit table is something a security team can read in an afternoon. Every feature we don't ship in v1 is a feature we don't have to defend in v1.
+  </div>
+
+  <h3>From MVP to pilot</h3>
+  <table>
+    <thead><tr><th>Concern</th><th>MVP today</th><th>Pilot upgrade path</th></tr></thead>
+    <tbody>
+      <tr><td>Storage</td><td>In-memory <span class="mono">sync.Map</span></td><td>PostgreSQL for audit, Redis for sessions</td></tr>
+      <tr><td>Mobile keys</td><td>Mocked biometric approval</td><td>Android Keystore / iOS Secure Enclave signed approval</td></tr>
+      <tr><td>Transport</td><td>HTTPS to backend</td><td>+ mTLS to ATM endpoints, IP allowlist</td></tr>
+      <tr><td>Deployment</td><td>Single Go binary</td><td>Same binary, deployed via the bank's existing CI</td></tr>
+      <tr><td>Monitoring</td><td>stdout logs + <span class="mono">/api/audit</span></td><td>Prometheus metrics + structured audit sink (S3 / Splunk)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <strong>Bottom line.</strong> The MVP is honest about what it is — a working, code-complete proof of concept that demonstrates the customer experience and the security model. The pilot upgrade path is a list of <em>added concerns</em>, not <em>rewrites</em>. Every piece of the MVP carries forward.
+  </div>
+</section>
+
+</body>
+</html>

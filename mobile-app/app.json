@@ -6,16 +6,23 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "demobank",
-    "ios": { "supportsTablet": false },
+    "ios": {
+      "supportsTablet": false
+    },
     "android": {
       "package": "com.demobank.mockup",
-      "permissions": ["CAMERA"]
+      "permissions": [
+        "CAMERA"
+      ]
     },
     "plugins": [
       [
         "expo-camera",
-        { "cameraPermission": "Allow DemoBank to scan ATM QR codes." }
-      ]
+        {
+          "cameraPermission": "Allow DemoBank to scan ATM QR codes."
+        }
+      ],
+      "expo-asset"
     ]
   }
 }
